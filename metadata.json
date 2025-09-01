@@ -1,0 +1,5 @@
+{
+  "name": "Expression",
+  "description": "A friendly, concise customer-support assistant powered by Gemini. Aura provides clear, step-by-step answers and expresses emotions through a companion face UI to create a more engaging and empathetic user experience.",
+  "requestFramePermissions": []
+}
