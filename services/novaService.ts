@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, Content } from '@google/genai';
 import { AURA_SYSTEM_INSTRUCTION } from '../constants';
 import type { AuraResponse, ChatMessage } from '../types';
@@ -11,28 +12,39 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 const responseSchema = {
   type: Type.OBJECT,
   properties: {
-    message: {
-      type: Type.STRING,
-    },
+    mode: { type: Type.STRING },
+    message: { type: Type.STRING },
     emotion: {
       type: Type.OBJECT,
       properties: {
         label: { type: Type.STRING },
-        confidence: { type: Type.NUMBER },
         animation_hint: { type: Type.STRING },
       },
-      required: ['label', 'confidence', 'animation_hint']
+      required: ['label', 'animation_hint']
     },
+    actions: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          payload: { type: Type.STRING },
+        },
+        required: ['title', 'payload']
+      }
+    },
+    query: { type: Type.STRING },
   },
-  required: ['message', 'emotion']
+  required: ['mode', 'message', 'emotion']
 };
+
 
 const MAX_RETRIES = 4;
 const INITIAL_DELAY_MS = 5000;
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export async function sendMessageToAura(history: ChatMessage[], newMessage: string): Promise<AuraResponse> {
+export async function sendMessageToAura(history: ChatMessage[]): Promise<AuraResponse> {
   let jsonString: string | undefined;
   let lastError: any = null;
 
@@ -40,10 +52,9 @@ export async function sendMessageToAura(history: ChatMessage[], newMessage: stri
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const contents: Content[] = history.map(msg => ({
-        role: msg.sender === 'aura' ? 'model' : 'user',
-        parts: [{ text: msg.message }]
+            role: msg.sender === 'aura' ? 'model' : 'user',
+            parts: [{ text: msg.message }]
       }));
-      contents.push({ role: 'user', parts: [{ text: newMessage }] });
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
@@ -79,17 +90,11 @@ export async function sendMessageToAura(history: ChatMessage[], newMessage: stri
     const finalErrorMessage = lastError instanceof Error ? lastError.message : String(lastError);
     
     if (finalErrorMessage.includes('429') || finalErrorMessage.includes('RESOURCE_EXHAUSTED')) {
-      return {
-        message: "I'm feeling a little overwhelmed right now. Please wait a moment before trying again.",
-        emotion: { label: 'worried', confidence: 1.0, animation_hint: 'shake' },
-      };
+      throw new Error("I'm feeling a little overwhelmed right now. Please wait a moment before trying again.");
     }
     
     // Generic API/network error
-    return {
-      message: "I'm sorry, I encountered a technical glitch. Please try again shortly.",
-      emotion: { label: 'sad', confidence: 1.0, animation_hint: 'shake' },
-    };
+    throw new Error("I'm sorry, I encountered a technical glitch. Please try again shortly.");
   }
 
   // Step 3: Parse the successful response
@@ -99,16 +104,23 @@ export async function sendMessageToAura(history: ChatMessage[], newMessage: stri
         return parsedResponse;
       } catch (jsonError) {
         console.error("Failed to parse JSON response from Aura:", jsonString, jsonError);
-        return {
-          message: "I seem to be having trouble forming my thoughts right now. Could you please try rephrasing your question?",
-          emotion: { label: 'confused', confidence: 1.0, animation_hint: 'shake' },
-        };
+        throw new Error("I seem to be having trouble forming my thoughts right now. Could you please try rephrasing your question?");
       }
   }
 
   // Fallback in case jsonString is somehow not set without an error
-  return {
-    message: "I'm sorry, I received an empty response. Could you try again?",
-    emotion: { label: 'confused', confidence: 1.0, animation_hint: 'shake' },
-  };
+  throw new Error("I'm sorry, I received an empty response. Could you try again?");
+}
+
+export async function getQueryResponse(query: string): Promise<string> {
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: query,
+        });
+        return response.text;
+    } catch(error) {
+        console.error("Error fetching query response:", error);
+        return "I'm sorry, I couldn't find an answer to that. There might have been a problem with the search.";
+    }
 }

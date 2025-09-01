@@ -1,51 +1,25 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { ChatMessage, EmotionState, AuraResponse, EmotionLabel } from './types';
-import { sendMessageToAura } from './services/novaService';
+import type { ChatMessage, EmotionState, AuraResponse, LocalBundle } from './types';
+import { sendMessageToAura, getQueryResponse } from './services/novaService';
 import EmotionFace from './components/EmotionFace';
 import ChatWindow from './components/ChatWindow';
 import MessageInput from './components/MessageInput';
 import ActionButton from './components/ActionButton';
+import { LOCAL_BUNDLE_CONFIG } from './constants';
 
-const getMoodClass = (label: EmotionLabel): string => {
-  if (['happy', 'excited', 'joyful', 'ecstatic', 'playful', 'giggling', 'proud', 'relieved', 'hopeful', 'affectionate'].includes(label)) {
-    return 'mood-happy';
+const getMoodClass = (label: EmotionState['label']): string => {
+  switch (label) {
+    case 'happy': return 'mood-happy';
+    case 'sad': return 'mood-sad';
+    case 'angry': return 'mood-angry';
+    case 'surprised': return 'mood-surprised';
+    case 'thinking': return 'mood-thinking';
+    case 'sleepy': return 'mood-sleepy';
+    case 'neutral':
+    default:
+      return 'mood-neutral';
   }
-  if (['sad', 'crying', 'lonely', 'guilty'].includes(label)) {
-    return 'mood-sad';
-  }
-  if (['angry', 'frustrated'].includes(label)) {
-    return 'mood-angry';
-  }
-  if (['surprised', 'amazed'].includes(label)) {
-    return 'mood-surprised';
-  }
-  if (['thinking', 'curious', 'determined', 'listening', 'nervous', 'worried', 'confused'].includes(label)) {
-    return 'mood-thinking';
-  }
-  if (['sleepy'].includes(label)) {
-    return 'mood-sleepy';
-  }
-  return 'mood-neutral'; // Default for neutral, shy, etc.
-};
-
-// Static triggers to change emotion without calling the API
-const staticEmotionTriggers: { [key: string]: EmotionLabel } = {
-  'sad face': 'sad',
-  'be sad': 'sad',
-  'happy face': 'happy',
-  'be happy': 'happy',
-  'angry face': 'angry',
-  'be angry': 'angry',
-  'surprised face': 'surprised',
-  'be surprised': 'surprised',
-  'thinking face': 'thinking',
-  'be thoughtful': 'thinking',
-  'playful face': 'playful',
-  'be playful': 'playful',
-  'show me a sad face': 'sad',
-  'show me a happy face': 'happy',
-  'show me an angry face': 'angry',
 };
 
 
@@ -54,125 +28,277 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [currentEmotion, setCurrentEmotion] = useState<EmotionState>({
     label: 'sleepy',
-    confidence: 1.0,
     animation_hint: 'none'
   });
   const [isTyping, setIsTyping] = useState<boolean>(false);
   const [backgroundClass, setBackgroundClass] = useState('mood-sleepy');
-  const previousEmotionRef = useRef<EmotionState | null>(null);
+  const [localConfig, setLocalConfig] = useState<LocalBundle | null>(null);
 
-  const suggestedPrompts = [
-    "How do I reset my password?",
-    "Tell me a fun fact.",
-    "What can you do?",
-  ];
+  const previousEmotionRef = useRef<EmotionState | null>(null);
+  const idleTimerRef = useRef<number | null>(null);
+  const idleStateRef = useRef({ nextIdleActionIndex: 0 });
+
+  // --- Local Response Generation ---
+  const generateLocalResponse = (message: string): Omit<ChatMessage, 'id' | 'sender'> | null => {
+    const cleanedMessage = message.toLowerCase().trim().replace(/[.,!?]/g, '');
+
+    // Greetings
+    if (['hi', 'hello', 'hey', 'yo', 'greetings'].some(term => cleanedMessage.startsWith(term))) {
+      return {
+        message: "Hey there! So happy to chat with you! 😊",
+        emotion: { label: 'happy', animation_hint: 'bounce' },
+        mode: 'local',
+        actions: localConfig?.default_actions,
+      };
+    }
+
+    // Gratitude
+    if (['thanks', 'thank you', 'thx', 'ty'].includes(cleanedMessage)) {
+      return {
+        message: "You're so welcome! Let me know if you need anything else! 😄",
+        emotion: { label: 'happy', animation_hint: 'giggle' },
+        mode: 'local',
+        actions: localConfig?.default_actions,
+      };
+    }
+    
+    // Farewells
+    if (['bye', 'goodbye', 'see you', 'cya'].includes(cleanedMessage)) {
+        return {
+            message: "Bye bye! Come back soon, I'll miss you! 🥺",
+            emotion: { label: 'sad', animation_hint: 'none' },
+            mode: 'local',
+        };
+    }
+    
+    // Well-being
+    if (['how are you', 'how are you doing', 'hows it going'].includes(cleanedMessage)) {
+        return {
+            message: "I'm doing great, thanks for asking! It's always a good day when I get to chat with you.",
+            emotion: { label: 'happy', animation_hint: 'bounce' },
+            mode: 'local',
+            actions: localConfig?.default_actions,
+        }
+    }
+
+    // From default actions
+    if (cleanedMessage === 'cheer me up') {
+        return {
+            message: "Of course! Remember, you're awesome and you can do anything you set your mind to! Here's a little dance to make you smile! 💃",
+            emotion: { label: 'happy', animation_hint: 'bounce' },
+            mode: 'local',
+            actions: [{title: "Thanks!", payload: "Thanks!"}, {title: "Surprise me", payload: "Surprise me"}],
+        }
+    }
+      
+    if (cleanedMessage === 'surprise me') {
+        const surprises = [
+            { msg: "Boo! Did you know a group of flamingos is called a flamboyance? Pretty cool, right?!", emotion: { label: 'surprised', animation_hint: 'recoil' } as EmotionState },
+            { msg: "Poof! Imagine a tiny elephant the size of a teacup. Cute, isn't it? 🐘", emotion: { label: 'surprised', animation_hint: 'recoil' } as EmotionState },
+            { msg: "Did you know that otters hold hands when they sleep so they don't float away? 🦦", emotion: { label: 'happy', animation_hint: 'giggle' } as EmotionState },
+        ];
+        const surprise = surprises[Math.floor(Math.random() * surprises.length)];
+        return {
+            message: surprise.msg,
+            emotion: surprise.emotion,
+            mode: 'local',
+            actions: localConfig?.default_actions,
+        }
+    }
+
+    return null; // No local response found
+  };
+
+
+  // --- Idle Timer Logic ---
+  const scheduleNextIdleAction = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (!localConfig?.idle_tokens) return;
+
+    const idleActions = Object.entries(localConfig.idle_tokens)
+      .map(([key, value]) => ({
+        delay: parseInt(key.replace('::idle::', ''), 10),
+        response: value
+      }))
+      .sort((a, b) => a.delay - b.delay);
+
+    const currentIndex = idleStateRef.current.nextIdleActionIndex;
+    if (currentIndex >= idleActions.length) {
+       idleStateRef.current.nextIdleActionIndex = 0; // Loop back
+       scheduleNextIdleAction();
+       return;
+    }
+
+    const nextAction = idleActions[currentIndex];
+    const lastActionDelay = currentIndex > 0 ? idleActions[currentIndex - 1].delay : 0;
+    const timeoutDelay = (nextAction.delay - lastActionDelay) * 1000;
+
+    idleTimerRef.current = window.setTimeout(() => {
+      if (isLoading) return; // Don't interrupt if loading
+
+      const idleMessage: ChatMessage = {
+        id: Date.now(),
+        sender: 'aura',
+        mode: 'local',
+        ...nextAction.response,
+      };
+      setMessages(prev => [...prev, idleMessage]);
+      setCurrentEmotion(nextAction.response.emotion);
+      idleStateRef.current.nextIdleActionIndex += 1;
+      scheduleNextIdleAction();
+    }, timeoutDelay);
+  }, [localConfig, isLoading]);
+
+  const resetIdleTimer = useCallback(() => {
+    idleStateRef.current.nextIdleActionIndex = 0;
+    scheduleNextIdleAction();
+  }, [scheduleNextIdleAction]);
+
+  useEffect(() => {
+    if (localConfig) {
+      resetIdleTimer();
+    }
+    return () => {
+        if(idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    }
+  }, [localConfig, resetIdleTimer]);
+
 
   // Update background mood when emotion changes
   useEffect(() => {
     setBackgroundClass(getMoodClass(currentEmotion.label));
   }, [currentEmotion]);
-  
+
   // Welcome sequence on initial load
   useEffect(() => {
-    // Aura "wakes up"
-    const wakeUpTimer = setTimeout(() => {
-      setCurrentEmotion({ label: 'curious', confidence: 1.0, animation_hint: 'recoil' });
+    const bootstrapTimer = setTimeout(() => {
+        // Set local config from constants file
+        setLocalConfig(LOCAL_BUNDLE_CONFIG);
+
+        // Create a static welcome message
+        const welcomeMessage: ChatMessage = {
+            id: Date.now(),
+            sender: 'aura',
+            message: "Hey! I'm Aura. So excited to chat with you! 😊",
+            emotion: { label: 'happy', animation_hint: 'bounce' },
+            mode: 'local',
+            actions: LOCAL_BUNDLE_CONFIG.default_actions
+        };
+
+        setMessages([welcomeMessage]);
+        setCurrentEmotion(welcomeMessage.emotion!);
     }, 800);
     
-    // Aura gives welcome message
-    const welcomeTimer = setTimeout(() => {
-      const welcomeMessage: ChatMessage = {
-        id: Date.now(),
-        sender: 'aura',
-        message: "Hello! I'm your support assistant. How can I help you today?",
-        emotion: {
-          label: 'happy',
-          confidence: 0.9,
-          animation_hint: 'bounce'
-        }
-      };
-      setCurrentEmotion(welcomeMessage.emotion);
-      setMessages([welcomeMessage]);
-    }, 2200); // Wait for wake up animation to complete
-
-    return () => {
-      clearTimeout(wakeUpTimer);
-      clearTimeout(welcomeTimer);
-    };
-  }, []); // Empty dependency array ensures this runs only once on mount
+    return () => clearTimeout(bootstrapTimer);
+  }, []); 
 
   // Logic to handle user typing
   useEffect(() => {
+    if (!localConfig?.typing_tokens) return;
+
     if (isTyping) {
-      if (currentEmotion.label !== 'listening') {
+        resetIdleTimer();
+      if (currentEmotion.label !== 'thinking') {
         previousEmotionRef.current = currentEmotion;
-        setCurrentEmotion({ label: 'listening', confidence: 1.0, animation_hint: 'none' });
+        const typingStartResponse = localConfig.typing_tokens['::typing::start'];
+        if (typingStartResponse) {
+          setCurrentEmotion(typingStartResponse.emotion);
+        }
       }
     } else {
-      if (previousEmotionRef.current && currentEmotion.label === 'listening') {
+      if (previousEmotionRef.current && currentEmotion.label === 'thinking') {
         setCurrentEmotion(previousEmotionRef.current);
         previousEmotionRef.current = null;
       }
     }
-  }, [isTyping, currentEmotion]);
+  }, [isTyping, currentEmotion, localConfig, resetIdleTimer]);
 
 
   const handleSendMessage = async (userMessage: string) => {
     if (!userMessage.trim()) return;
 
-    setIsTyping(false); 
-    previousEmotionRef.current = null; 
-
+    resetIdleTimer();
+    setIsTyping(false);
+    previousEmotionRef.current = null;
+    
     const newUserMessage: ChatMessage = {
-      id: Date.now(),
-      sender: 'user',
-      message: userMessage,
-      emotion: { label: 'neutral', confidence: 1.0, animation_hint: 'none' },
+        id: Date.now(),
+        sender: 'user',
+        message: userMessage,
     };
     
-    const normalizedMessage = userMessage.trim().toLowerCase();
-    const staticEmotion = staticEmotionTriggers[normalizedMessage];
-
-    // If the message is a static trigger, just change the face and stop.
-    if (staticEmotion) {
-      setMessages(prev => [...prev, newUserMessage]);
-      setCurrentEmotion({ label: staticEmotion, confidence: 1.0, animation_hint: 'recoil' });
-      return;
+    const currentMessages = [...messages, newUserMessage];
+    setMessages(currentMessages); // Update UI with user message
+    
+    const localResponse = generateLocalResponse(userMessage);
+    if (localResponse) {
+        setCurrentEmotion({ label: 'thinking', animation_hint: 'none' });
+        setTimeout(() => {
+            const newAuraMessage: ChatMessage = {
+                id: Date.now() + 1,
+                sender: 'aura',
+                ...localResponse,
+            };
+            setMessages(prev => [...prev, newAuraMessage]);
+            setCurrentEmotion(localResponse.emotion!);
+            resetIdleTimer();
+        }, 750); // A short delay for a more natural feel
+        return; // Done, no API call needed
     }
-
-    // Otherwise, proceed with the normal API call flow.
-    const fullHistory = [...messages, newUserMessage];
-    setMessages(fullHistory);
+    
     setIsLoading(true);
-    setCurrentEmotion({ label: 'thinking', confidence: 1.0, animation_hint: 'none' });
+    setCurrentEmotion({ label: 'thinking', animation_hint: 'none' });
 
     try {
-      // Pass the history *before* the new message, and the new message itself.
-      const auraResponse = await sendMessageToAura(messages, userMessage);
-      const newAuraMessage: ChatMessage = {
+      // Use the up-to-date message history for the API call
+      const auraResponse = await sendMessageToAura(currentMessages);
+      
+      const responseMessage: ChatMessage = {
         id: Date.now() + 1,
         sender: 'aura',
-        ...auraResponse,
+        ...auraResponse
       };
-      setMessages(prev => [...prev, newAuraMessage]);
-      setCurrentEmotion(auraResponse.emotion);
+
+      if (auraResponse.mode === 'query' && auraResponse.query) {
+        setMessages(prev => [...prev, responseMessage]); // Add "Let me check..."
+        setCurrentEmotion(auraResponse.emotion);
+        
+        const queryResult = await getQueryResponse(auraResponse.query);
+        const finalMessage: ChatMessage = {
+            id: Date.now() + 2,
+            sender: 'aura',
+            message: queryResult,
+            emotion: { label: 'neutral', animation_hint: 'recoil' },
+            mode: 'local'
+        };
+        setMessages(prev => [...prev, finalMessage]);
+        setCurrentEmotion(finalMessage.emotion);
+
+      } else {
+         setMessages(prev => [...prev, responseMessage]);
+         setCurrentEmotion(auraResponse.emotion);
+      }
     } catch (error) {
       console.error("Error sending message:", error);
-      const errorResponse: AuraResponse = {
-        message: "I'm sorry, I encountered an error and couldn't process your request. Please try again.",
-        emotion: { label: 'sad', confidence: 1.0, animation_hint: 'shake' },
+      const errorMessage = error instanceof Error ? error.message : "I'm sorry, I encountered an error and couldn't process your request. Please try again.";
+      const errorResponse: Omit<AuraResponse, 'mode'> = {
+        message: errorMessage,
+        emotion: { label: 'sad', animation_hint: 'shake' },
       };
       const errorAuraMessage: ChatMessage = {
         id: Date.now() + 1,
         sender: 'aura',
+        mode: 'local',
         ...errorResponse
       };
       setMessages(prev => [...prev, errorAuraMessage]);
       setCurrentEmotion(errorResponse.emotion);
     } finally {
       setIsLoading(false);
+      resetIdleTimer();
     }
   };
+
 
   const handleTyping = useCallback((typing: boolean) => {
     setIsTyping(typing);
@@ -181,6 +307,9 @@ const App: React.FC = () => {
   const handleSuggestedPrompt = (prompt: string) => {
     handleSendMessage(prompt);
   };
+  
+  const lastAuraMessage = [...messages].reverse().find(m => m.sender === 'aura');
+  const actionsToShow = !isLoading ? (lastAuraMessage?.actions ?? localConfig?.default_actions) : [];
 
   return (
     <div className={`flex h-screen w-full items-center justify-center p-4 font-sans bg-gradient-to-br from-gray-900 via-slate-900 to-black bg-mood-container ${backgroundClass}`}>
@@ -194,13 +323,13 @@ const App: React.FC = () => {
         <div className="flex flex-1 flex-col bg-chat-gradient backdrop-blur-lg">
           <ChatWindow messages={messages} isLoading={isLoading} />
           
-          {messages.length <= 1 && !isLoading && (
+          {actionsToShow && actionsToShow.length > 0 && (
             <div className="px-6 pb-3 pt-0 flex flex-wrap gap-2 animate-pop-in">
-                {suggestedPrompts.map((prompt) => (
+                {actionsToShow.map((action) => (
                     <ActionButton 
-                        key={prompt} 
-                        title={prompt} 
-                        onClick={() => handleSuggestedPrompt(prompt)} 
+                        key={action.title} 
+                        title={action.title} 
+                        onClick={() => handleSuggestedPrompt(action.payload)} 
                     />
                 ))}
             </div>
