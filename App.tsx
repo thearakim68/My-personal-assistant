@@ -29,6 +29,25 @@ const getMoodClass = (label: EmotionLabel): string => {
   return 'mood-neutral'; // Default for neutral, shy, etc.
 };
 
+// Static triggers to change emotion without calling the API
+const staticEmotionTriggers: { [key: string]: EmotionLabel } = {
+  'sad face': 'sad',
+  'be sad': 'sad',
+  'happy face': 'happy',
+  'be happy': 'happy',
+  'angry face': 'angry',
+  'be angry': 'angry',
+  'surprised face': 'surprised',
+  'be surprised': 'surprised',
+  'thinking face': 'thinking',
+  'be thoughtful': 'thinking',
+  'playful face': 'playful',
+  'be playful': 'playful',
+  'show me a sad face': 'sad',
+  'show me a happy face': 'happy',
+  'show me an angry face': 'angry',
+};
+
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -111,7 +130,17 @@ const App: React.FC = () => {
       emotion: { label: 'neutral', confidence: 1.0, animation_hint: 'none' },
     };
     
-    // The full history is the current messages plus the new user message.
+    const normalizedMessage = userMessage.trim().toLowerCase();
+    const staticEmotion = staticEmotionTriggers[normalizedMessage];
+
+    // If the message is a static trigger, just change the face and stop.
+    if (staticEmotion) {
+      setMessages(prev => [...prev, newUserMessage]);
+      setCurrentEmotion({ label: staticEmotion, confidence: 1.0, animation_hint: 'recoil' });
+      return;
+    }
+
+    // Otherwise, proceed with the normal API call flow.
     const fullHistory = [...messages, newUserMessage];
     setMessages(fullHistory);
     setIsLoading(true);

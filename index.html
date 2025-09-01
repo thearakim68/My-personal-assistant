@@ -33,6 +33,20 @@
         75% { transform: rotate(-2.5deg) translateX(3px); }
       }
 
+      @keyframes body-giggle {
+        0%, 100% { transform: translate(0, 0) rotate(0); }
+        20% { transform: translate(-2px, 0) rotate(-1.5deg); }
+        40% { transform: translate(2px, 0) rotate(1.5deg); }
+        60% { transform: translate(-1px, -1px) rotate(1deg); }
+        80% { transform: translate(1px, 1px) rotate(-1deg); }
+      }
+
+      @keyframes body-bounce {
+        0%, 100% { transform: translateY(0) scaleY(1); }
+        40% { transform: translateY(-12px) scaleY(1.05); }
+        60% { transform: translateY(2px) scaleY(0.95); }
+      }
+
       @keyframes body-sway {
         0%, 100% { transform: translateX(0) rotate(0); }
         50% { transform: translateX(4px) rotate(1.5deg); }
@@ -50,6 +64,12 @@
         97% { transform: translateY(0); }
         98% { transform: translateY(-1.5px); }
         99% { transform: translateY(0); }
+      }
+      
+      @keyframes tongue-peek {
+        0%, 85%, 100% { transform: scaleY(0); opacity: 0; }
+        90% { transform: scaleY(1); opacity: 1; }
+        95% { transform: scaleY(1); opacity: 1; }
       }
 
       @keyframes pop-in {

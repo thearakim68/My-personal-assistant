@@ -33,8 +33,10 @@ const INITIAL_DELAY_MS = 5000;
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function sendMessageToAura(history: ChatMessage[], newMessage: string): Promise<AuraResponse> {
+  let jsonString: string | undefined;
   let lastError: any = null;
 
+  // Step 1: Get response from API with retries for retriable errors
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const contents: Content[] = history.map(msg => ({
@@ -53,9 +55,9 @@ export async function sendMessageToAura(history: ChatMessage[], newMessage: stri
         },
       });
       
-      const jsonString = response.text.trim();
-      const parsedResponse: AuraResponse = JSON.parse(jsonString);
-      return parsedResponse; // Success!
+      jsonString = response.text.trim();
+      lastError = null; // Clear error on success
+      break; // Exit loop successfully
     } catch (error) {
       lastError = error;
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -66,36 +68,47 @@ export async function sendMessageToAura(history: ChatMessage[], newMessage: stri
         console.warn(`Rate limit hit. Retrying in ${delayMs}ms... (Attempt ${attempt}/${MAX_RETRIES})`);
         await delay(delayMs);
       } else {
-        // Not a rate limit error, or final attempt failed. Break loop.
-        break;
+        break; // Non-retriable error or max retries hit
       }
     }
   }
 
-  // If we exit the loop, it means all retries have failed.
-  console.error('Error processing Aura response after all retries:', lastError);
-
-  const finalErrorMessage = lastError instanceof Error ? lastError.message : String(lastError);
-  const isFinalRateLimitError = finalErrorMessage.includes('429') || finalErrorMessage.includes('RESOURCE_EXHAUSTED');
-  
-  if (isFinalRateLimitError) {
+  // Step 2: Handle API call failures after all retries
+  if (lastError) {
+    console.error('Error processing Aura response after all retries:', lastError);
+    const finalErrorMessage = lastError instanceof Error ? lastError.message : String(lastError);
+    
+    if (finalErrorMessage.includes('429') || finalErrorMessage.includes('RESOURCE_EXHAUSTED')) {
+      return {
+        message: "I'm feeling a little overwhelmed right now. Please wait a moment before trying again.",
+        emotion: { label: 'worried', confidence: 1.0, animation_hint: 'shake' },
+      };
+    }
+    
+    // Generic API/network error
     return {
-      message: "I'm feeling a little overwhelmed right now. Please wait a moment before trying again.",
-      emotion: {
-        label: 'worried',
-        confidence: 1.0,
-        animation_hint: 'shake'
-      },
+      message: "I'm sorry, I encountered a technical glitch. Please try again shortly.",
+      emotion: { label: 'sad', confidence: 1.0, animation_hint: 'shake' },
     };
   }
 
-  // Generic fallback for other errors
+  // Step 3: Parse the successful response
+  if (jsonString) {
+      try {
+        const parsedResponse: AuraResponse = JSON.parse(jsonString);
+        return parsedResponse;
+      } catch (jsonError) {
+        console.error("Failed to parse JSON response from Aura:", jsonString, jsonError);
+        return {
+          message: "I seem to be having trouble forming my thoughts right now. Could you please try rephrasing your question?",
+          emotion: { label: 'confused', confidence: 1.0, animation_hint: 'shake' },
+        };
+      }
+  }
+
+  // Fallback in case jsonString is somehow not set without an error
   return {
-    message: "I'm sorry, I encountered a technical glitch. Please try again shortly.",
-    emotion: {
-      label: 'sad',
-      confidence: 1.0,
-      animation_hint: 'shake'
-    },
+    message: "I'm sorry, I received an empty response. Could you try again?",
+    emotion: { label: 'confused', confidence: 1.0, animation_hint: 'shake' },
   };
 }
